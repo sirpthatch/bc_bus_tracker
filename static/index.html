@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FFC72C">
+  <title>Bus Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚌</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <span class="brand">🚌 School Bus</span>
+      <span id="clock" class="clock">--:--</span>
+    </header>
+
+    <section id="hero" class="hero calm" aria-live="polite">
+      <div id="hero-label" class="hero-label">Loading…</div>
+      <div id="hero-big" class="hero-big">&nbsp;</div>
+      <div id="hero-sub" class="hero-sub">&nbsp;</div>
+    </section>
+
+    <section id="leave" class="leave calm">
+      <div id="leave-emoji" class="leave-emoji">🙂</div>
+      <div>
+        <div id="leave-title" class="leave-title">&nbsp;</div>
+        <div id="leave-sub" class="leave-sub">&nbsp;</div>
+      </div>
+    </section>
+
+    <section class="track" aria-hidden="true">
+      <div class="road">
+        <div class="dashes"></div>
+        <div id="track-bus" class="track-bus">🚌</div>
+        <div class="track-home">🏠</div>
+      </div>
+      <div class="track-labels"><span>far away</span><span>our stop</span></div>
+    </section>
+
+    <section class="card map-card">
+      <div id="map"></div>
+      <div id="bus-detail" class="detail"></div>
+    </section>
+
+    <section class="card">
+      <h2>How we know</h2>
+      <p id="source" class="detail"></p>
+      <h2>Recent mornings</h2>
+      <ul id="history" class="history"><li class="muted">No mornings recorded yet.</li></ul>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

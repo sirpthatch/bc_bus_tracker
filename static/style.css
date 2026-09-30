@@ -1,0 +1,178 @@
+:root {
+  --bg: #fff8e6;
+  --card: #ffffff;
+  --ink: #1f1a10;
+  --muted: #6b6250;
+  --line: #eadfc4;
+  --bus: #ffc72c;
+  --calm: #2e9e5b;
+  --calm-bg: #e3f5ea;
+  --soon: #c77700;
+  --soon-bg: #fff0cc;
+  --go: #d23c2f;
+  --go-bg: #fde3df;
+  --done: #2f6fd2;
+  --done-bg: #e2ecfd;
+  --off: #6b6250;
+  --off-bg: #f1ece0;
+  --road: #4a4a52;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17140e;
+    --card: #221e16;
+    --ink: #f6f0e1;
+    --muted: #b3a88f;
+    --line: #3a3326;
+    --calm-bg: #173524;
+    --soon-bg: #3c2c0b;
+    --go-bg: #45191a;
+    --done-bg: #152a4a;
+    --off-bg: #2a261c;
+    --calm: #5fd08c;
+    --soon: #ffb74a;
+    --go: #ff7a6b;
+    --done: #7fb0ff;
+    --off: #b3a88f;
+    --road: #5b5b66;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Fredoka", system-ui, -apple-system, sans-serif;
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.clock { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.hero {
+  border-radius: 24px;
+  padding: 22px 20px;
+  text-align: center;
+  background: var(--bus);
+  color: #1f1a10;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.12);
+}
+.hero-label { font-size: 1.4rem; font-weight: 500; }
+.hero-big {
+  font-size: clamp(4rem, 22vw, 7.5rem);
+  font-weight: 700;
+  line-height: 1;
+  margin: 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+.hero-sub { font-size: 1.3rem; font-weight: 500; }
+.hero.off { background: var(--off-bg); color: var(--ink); }
+.hero.done { background: var(--done-bg); color: var(--ink); }
+
+.leave {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-radius: 20px;
+  padding: 14px 18px;
+  border: 3px solid currentColor;
+}
+.leave-emoji { font-size: 3rem; line-height: 1; }
+.leave-title { font-size: 1.6rem; font-weight: 700; }
+.leave-sub { font-size: 1.1rem; color: var(--ink); }
+.leave.calm { color: var(--calm); background: var(--calm-bg); }
+.leave.soon { color: var(--soon); background: var(--soon-bg); }
+.leave.go { color: var(--go); background: var(--go-bg); animation: pulse 1.2s ease-in-out infinite; }
+.leave.done { color: var(--done); background: var(--done-bg); }
+.leave.off { color: var(--off); background: var(--off-bg); }
+
+@keyframes pulse { 50% { transform: scale(1.02); } }
+@media (prefers-reduced-motion: reduce) { .leave.go { animation: none; } }
+
+.track { padding: 4px 4px 0; }
+.road {
+  position: relative;
+  height: 64px;
+  background: var(--road);
+  border-radius: 32px;
+  overflow: hidden;
+}
+.dashes {
+  position: absolute;
+  left: 20px; right: 20px; top: 50%;
+  border-top: 4px dashed #ffd54a;
+  transform: translateY(-50%);
+}
+.track-bus, .track-home {
+  position: absolute;
+  top: 50%;
+  font-size: 2.6rem;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+}
+.track-bus {
+  left: 8%;
+  transition: left 1s ease-out;
+  transform: translate(-50%, -50%) scaleX(-1); /* face toward the house */
+}
+.track-home { left: calc(100% - 34px); }
+.track-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.95rem;
+  padding: 4px 10px 0;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 14px 16px;
+}
+.map-card { padding: 0; overflow: hidden; }
+#map { height: 340px; width: 100%; }
+.map-card .detail { padding: 10px 16px 14px; }
+.detail { color: var(--muted); font-size: 1.05rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 6px 0 6px; }
+h2 + .detail { margin-bottom: 14px; }
+
+.history { list-style: none; margin: 0; padding: 0; }
+.history li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.history .late { color: var(--go); }
+.history .early { color: var(--calm); }
+.muted { color: var(--muted); }
+
+.bus-marker, .stop-marker { font-size: 30px; line-height: 1; text-align: center; }
+.route-dot {
+  background: var(--card);
+  border: 3px solid var(--muted);
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  font-size: 11px; font-weight: 700;
+  display: grid; place-items: center;
+  color: var(--ink);
+}
