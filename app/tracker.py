@@ -7,7 +7,7 @@ from datetime import datetime
 from . import config
 from .db import Store
 from .glympse import GlympseClient
-from .predict import PastTrip, build_past_trip
+from .predict import PastTrip, build_past_trip, find_arrival
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,8 @@ class Tracker:
         self.last_poll: datetime | None = None
         self.last_error: str | None = None
         self._history: tuple[str, list[PastTrip]] | None = None
+        # Arrival time at our stop per past date (None = never reached it). Past days don't change.
+        self._arrivals: dict[str, int | None] = {}
 
     def history(self, today: str) -> list[PastTrip]:
         """Past trips that reached our stop, most recent first. Cached per day."""
@@ -42,6 +44,17 @@ class Tracker:
                     break
             self._history = (today, trips)
         return self._history[1]
+
+    def arrivals(self, today: str) -> list[tuple[str, int]]:
+        """(date, arrival_ts) for every recorded morning before today, most recent first."""
+        out = []
+        for date in self.store.trip_dates(before=today, limit=10_000):
+            if date not in self._arrivals:
+                stop = config.MY_STOP
+                self._arrivals[date] = find_arrival(self.store.trip_points(date), stop.lat, stop.lon)
+            if self._arrivals[date] is not None:
+                out.append((date, self._arrivals[date]))
+        return out
 
     async def poll_once(self) -> None:
         codes = await self.client.current_invites(config.GLYMPSE_TAG)

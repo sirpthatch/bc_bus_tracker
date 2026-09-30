@@ -3,59 +3,95 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#FFC72C">
   <title>Bus Tracker</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚌</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%232a78d6'/></svg>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
-    <header>
-      <span class="brand">🚌 School Bus</span>
-      <span id="clock" class="clock">--:--</span>
+    <header class="topbar">
+      <div>
+        <h1>Morning bus · <span id="stop-name">5th Ave &amp; 9th St</span></h1>
+        <div class="subtle" id="subtitle">Stop 9 of 9 · scheduled 07:58</div>
+      </div>
+      <div class="topbar-right">
+        <span id="pill" class="pill"><span class="pill-dot"></span><span id="pill-label">Loading</span></span>
+        <span id="clock" class="clock num">--:--:--</span>
+      </div>
     </header>
 
-    <section id="hero" class="hero calm" aria-live="polite">
-      <div id="hero-label" class="hero-label">Loading…</div>
-      <div id="hero-big" class="hero-big">&nbsp;</div>
-      <div id="hero-sub" class="hero-sub">&nbsp;</div>
-    </section>
+    <section class="summary">
+      <div class="card hero">
+        <div class="label" id="hero-label">Estimated arrival</div>
+        <div class="hero-row">
+          <span id="hero-big" class="hero-big">–</span>
+          <span id="hero-unit" class="hero-unit"></span>
+        </div>
+        <div id="hero-sub" class="hero-sub num">&nbsp;</div>
+        <div class="meter" aria-hidden="true">
+          <div class="meter-track"><div id="meter-fill" class="meter-fill"></div><div id="meter-dot" class="meter-dot"></div></div>
+          <div class="meter-ticks num"><span>−30 min</span><span>−20</span><span>−10</span><span>stop</span></div>
+        </div>
+      </div>
 
-    <section id="leave" class="leave calm">
-      <div id="leave-emoji" class="leave-emoji">🙂</div>
-      <div>
-        <div id="leave-title" class="leave-title">&nbsp;</div>
-        <div id="leave-sub" class="leave-sub">&nbsp;</div>
+      <div id="leave" class="card leave">
+        <div class="label">Departure</div>
+        <div class="leave-status"><span id="leave-icon" class="leave-icon"></span><span id="leave-label">–</span></div>
+        <div id="leave-title" class="leave-title num">&nbsp;</div>
+        <div id="leave-sub" class="subtle">&nbsp;</div>
       </div>
     </section>
 
-    <section class="track" aria-hidden="true">
-      <div class="road">
-        <div class="dashes"></div>
-        <div id="track-bus" class="track-bus">🚌</div>
-        <div class="track-home">🏠</div>
-      </div>
-      <div class="track-labels"><span>far away</span><span>our stop</span></div>
+    <section class="kpis">
+      <div class="card kpi"><div class="label">Last GPS fix</div><div id="kpi-fix" class="kpi-value">–</div><div id="kpi-fix-sub" class="subtle">&nbsp;</div></div>
+      <div class="card kpi"><div class="label">Speed</div><div id="kpi-speed" class="kpi-value">–</div><div class="subtle">mph</div></div>
+      <div class="card kpi"><div class="label">Last stop passed</div><div id="kpi-stop" class="kpi-value">–</div><div id="kpi-stop-sub" class="subtle">&nbsp;</div></div>
+      <div class="card kpi"><div class="label">Schedule deviation</div><div id="kpi-dev" class="kpi-value">–</div><div class="subtle">at last stop passed</div></div>
     </section>
 
     <section class="card map-card">
-      <div id="map"></div>
-      <div id="bus-detail" class="detail"></div>
+      <div id="map" role="img" aria-label="Map of the bus route with the bus's current position"></div>
     </section>
 
-    <section class="card">
-      <h2>How we know</h2>
-      <p id="source" class="detail"></p>
-      <h2>Recent mornings</h2>
-      <ul id="history" class="history"><li class="muted">No mornings recorded yet.</li></ul>
+    <section class="card dist">
+      <div class="section-head">
+        <div>
+          <h2>Arrival time distribution</h2>
+          <div class="subtle" id="dist-caption">Observed arrivals at our stop</div>
+        </div>
+        <button id="table-toggle" class="btn" type="button" aria-pressed="false">Table</button>
+      </div>
+      <div id="dist-empty" class="empty" hidden>No recorded arrivals yet. The distribution appears after the first morning is recorded.</div>
+      <div id="dist-body">
+        <div id="dist-stats" class="stats"></div>
+        <div class="chart-block">
+          <div class="chart-title">Arrivals per minute</div>
+          <div id="hist" class="chart"></div>
+        </div>
+        <div class="chart-block">
+          <div class="chart-title">Share of mornings arrived by time</div>
+          <div id="ecdf" class="chart"></div>
+        </div>
+        <div id="dist-table-wrap" class="table-wrap" hidden>
+          <table class="table num">
+            <thead><tr><th>Date</th><th>Arrived</th><th>vs 07:58</th></tr></thead>
+            <tbody id="dist-table"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
+
+    <footer class="method">
+      <h2>Method</h2>
+      <p id="source" class="subtle"></p>
+      <p class="subtle">ETA = time of latest GPS fix + median time-to-stop from past mornings, measured from the point on each past trip nearest the bus's current position (within 150 m, same heading). Range shown is the interquartile range. With fewer than <span id="min-trips">3</span> matching mornings, the printed schedule is used. Departure time assumes the longest walk, <span id="walk-max">12</span> min.</p>
+    </footer>
   </main>
 
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

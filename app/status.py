@@ -117,13 +117,13 @@ def build_status(
     }
 
 
-def history_summary(history: list[PastTrip]) -> list[dict]:
+def history_summary(arrivals: list[tuple[str, int]]) -> list[dict]:
     out = []
-    for trip in history:
-        arrived = datetime.fromtimestamp(trip.arrival_ts / 1000, config.TZ)
+    for trip_date, arrival_ts in arrivals:
+        arrived = datetime.fromtimestamp(arrival_ts / 1000, config.TZ)
         scheduled = _scheduled_on(arrived.date())
         out.append({
-            "date": trip.date,
+            "date": trip_date,
             "arrived": arrived.isoformat(),
             "minutes_vs_schedule": round((arrived - scheduled).total_seconds() / 60, 1),
         })

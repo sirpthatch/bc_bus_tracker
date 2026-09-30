@@ -68,7 +68,7 @@ async def status(request: Request):
 @app.get("/api/history")
 async def history(request: Request):
     tracker: Tracker = request.app.state.tracker
-    return history_summary(tracker.history(datetime.now(config.TZ).date().isoformat()))
+    return history_summary(tracker.arrivals(datetime.now(config.TZ).date().isoformat()))
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

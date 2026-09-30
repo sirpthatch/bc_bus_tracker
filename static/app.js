@@ -1,35 +1,48 @@
 "use strict";
 
 const REFRESH_MS = 10000;
-const TRACK_MINUTES = 30; // the kid track spans the last 30 minutes before the bus arrives
+const METER_MINUTES = 30; // the meter spans the last 30 minutes before arrival
 
 let status = null;
+let historyRows = [];
 let clockOffset = 0; // server time minus local time
 let map, busMarker, trailLine, fitted = false;
+let showTable = false;
 
 const $ = (id) => document.getElementById(id);
 const now = () => new Date(Date.now() + clockOffset);
-const fmtTime = (iso) =>
-  new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M/i, "");
+const fmt = (iso, seconds = false) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: seconds ? "2-digit" : undefined, hourCycle: "h23" });
 const minutesUntil = (iso) => (new Date(iso) - now()) / 60000;
+const text = (id, value) => { $(id).textContent = value; };
+
+// Minutes since midnight in the stop's timezone, anchored on the scheduled time so the
+// viewer's own timezone doesn't matter.
+function schedMinutes(s) {
+  const [h, m] = s.route[s.route.length - 1].scheduled.split(":").map(Number);
+  return h * 60 + m;
+}
+const toStopMinutes = (s, iso) => schedMinutes(s) + (new Date(iso) - new Date(s.scheduled)) / 60000;
+
+/* ---------- map ---------- */
 
 function initMap() {
-  map = L.map("map", { zoomControl: true, attributionControl: true });
+  map = L.map("map", { zoomControl: true, attributionControl: true, zoomSnap: 0.25 });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(map);
-  trailLine = L.polyline([], { color: "#e0a800", weight: 6, opacity: 0.85 }).addTo(map);
+  trailLine = L.polyline([], { color: getComputedStyle(document.documentElement).getPropertyValue("--series").trim(), weight: 3, opacity: 0.9 }).addTo(map);
 }
 
 function drawStaticMap(s) {
   for (const stop of s.route.slice(0, -1)) {
     L.marker([stop.lat, stop.lon], {
-      icon: L.divIcon({ className: "", html: `<div class="route-dot">${stop.num}</div>`, iconSize: [22, 22] }),
+      icon: L.divIcon({ className: "", html: `<div class="m-route">${stop.num}</div>`, iconSize: [18, 18] }),
     }).bindTooltip(`${stop.num}. ${stop.name} · ${stop.scheduled}`).addTo(map);
   }
   L.marker([s.stop.lat, s.stop.lon], {
-    icon: L.divIcon({ className: "stop-marker", html: "🏠", iconSize: [34, 34] }),
+    icon: L.divIcon({ className: "", html: '<div class="m-stop"></div>', iconSize: [14, 14] }),
     zIndexOffset: 500,
   }).bindTooltip(`Our stop: ${s.stop.name}`).addTo(map);
   map.fitBounds(s.route.map((r) => [r.lat, r.lon]), { padding: [20, 20] });
@@ -41,9 +54,9 @@ function updateMap(s) {
     const pos = [s.bus.lat, s.bus.lon];
     if (!busMarker) {
       busMarker = L.marker(pos, {
-        icon: L.divIcon({ className: "bus-marker", html: "🚌", iconSize: [34, 34] }),
+        icon: L.divIcon({ className: "", html: '<div class="m-bus"></div>', iconSize: [16, 16] }),
         zIndexOffset: 1000,
-      }).addTo(map);
+      }).bindTooltip("Bus").addTo(map);
     }
     busMarker.setLatLng(pos);
     if (!fitted) {
@@ -56,129 +69,198 @@ function updateMap(s) {
   }
 }
 
-function setHero(cls, label, big, sub) {
-  $("hero").className = `hero ${cls}`;
-  $("hero-label").textContent = label;
-  $("hero-big").textContent = big;
-  $("hero-sub").textContent = sub;
+/* ---------- live summary ---------- */
+
+const PILL = {
+  tracking: ["live", "Live"],
+  waiting: ["warn", "Awaiting GPS"],
+  ended: ["", "Share ended"],
+  arrived: ["", "Arrived"],
+  off_hours: ["", "Off hours"],
+};
+
+function setLeave(level, icon, label, title, sub) {
+  $("leave").className = `card leave ${level}`;
+  text("leave-icon", icon);
+  text("leave-label", label);
+  text("leave-title", title);
+  text("leave-sub", sub);
 }
 
-function setLeave(cls, emoji, title, sub) {
-  $("leave").className = `leave ${cls}`;
-  $("leave-emoji").textContent = emoji;
-  $("leave-title").textContent = title;
-  $("leave-sub").textContent = sub;
-}
-
-function setTrack(minutesLeft) {
-  const frac = minutesLeft == null ? 0 : 1 - Math.min(Math.max(minutesLeft, 0), TRACK_MINUTES) / TRACK_MINUTES;
-  // Bus travels from 8% to just short of the house.
-  $("track-bus").style.left = `${8 + frac * 76}%`;
-}
-
-function etaText(s) {
-  if (s.eta_source !== "history") return `at ${fmtTime(s.eta)}`;
-  const lo = fmtTime(s.eta_low), hi = fmtTime(s.eta_high);
-  return lo === hi ? `at ${fmtTime(s.eta)}` : `at ${fmtTime(s.eta)}  (${lo}–${hi})`;
+function setMeter(minutesLeft) {
+  const frac = minutesLeft == null ? 0 : 1 - Math.min(Math.max(minutesLeft, 0), METER_MINUTES) / METER_MINUTES;
+  $("meter-dot").style.left = `${frac * 100}%`;
+  $("meter-fill").style.width = `${frac * 100}%`;
+  $("meter-dot").classList.toggle("idle", minutesLeft == null);
 }
 
 function renderLive() {
   const s = status;
   if (!s) return;
-  $("clock").textContent = now().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  text("clock", now().toLocaleTimeString([], { hourCycle: "h23" }));
   const [walkMin, walkMax] = s.walk_minutes;
+  const [pillCls, pillLabel] = PILL[s.state] || ["", s.state];
+  $("pill").className = `pill ${pillCls}`;
+  text("pill-label", pillLabel);
 
   if (s.state === "arrived") {
-    setHero("done", "The bus came!", "🎒", `at ${fmtTime(s.arrived_at)}`);
-    setLeave("done", "👋", "Have a great day!", `Bus reached ${s.stop.name} at ${fmtTime(s.arrived_at)}.`);
-    setTrack(0);
+    const dev = (new Date(s.arrived_at) - new Date(s.scheduled)) / 60000;
+    text("hero-label", "Arrived");
+    text("hero-big", fmt(s.arrived_at));
+    text("hero-unit", "");
+    text("hero-sub", `${Charts.signed(dev)} min vs schedule`);
+    setMeter(0);
+    setLeave("", "✓", "Complete", fmt(s.arrived_at, true), "Bus reached the stop today.");
     return;
   }
 
-  if (s.state === "off_hours") {
-    const day = new Date(s.scheduled).toLocaleDateString([], { weekday: "long" });
+  if (s.state === "off_hours" || s.state === "ended") {
+    const day = new Date(s.scheduled).toLocaleDateString([], { weekday: "short" });
     const isToday = new Date(s.scheduled).toDateString() === now().toDateString();
-    setHero("off", `Next bus${isToday ? " today" : ` ${day}`}`, fmtTime(s.scheduled), "😴 The bus is sleeping");
-    setLeave("off", "🕢", `Leave home by ${fmtTime(s.leave_by)}`,
-      `Live tracking starts at ${s.track_window[0]}.`);
-    setTrack(null);
+    text("hero-label", s.state === "ended" ? "Scheduled arrival" : "Next scheduled arrival");
+    text("hero-big", fmt(s.scheduled));
+    text("hero-unit", isToday ? "today" : day);
+    text("hero-sub", s.state === "ended"
+      ? "Location share ended; no live data."
+      : `Live tracking ${s.track_window[0]}–${s.track_window[1]} on school days.`);
+    setMeter(null);
+    setLeave("", "–", s.state === "ended" ? "No live data" : "Scheduled",
+      `Leave ${fmt(s.leave_by)}`, `Printed schedule minus ${walkMax}-min walk.`);
     return;
   }
 
   const mins = minutesUntil(s.eta);
   const leaveIn = minutesUntil(s.leave_by);
-  const waiting = s.state !== "tracking";
+  const live = s.state === "tracking";
+  const model = s.eta_source === "history" ? `historical model, n=${s.trips_used}` : "printed schedule";
+  const range = s.eta_source === "history" && fmt(s.eta_low) !== fmt(s.eta_high)
+    ? ` · IQR ${fmt(s.eta_low)}–${fmt(s.eta_high)}` : "";
 
-  if (s.state === "ended") {
-    setHero("off", "Tracking stopped", fmtTime(s.scheduled), "The bus stopped sharing its location");
-    setLeave("off", "🤷", "No live location", `Scheduled pickup is ${fmtTime(s.scheduled)}.`);
-    setTrack(null);
-    return;
-  }
-
+  text("hero-label", live ? "Estimated arrival" : "Scheduled arrival · awaiting GPS");
   if (mins <= 0.5) {
-    setHero("", waiting ? "Scheduled for" : "The bus is", waiting ? fmtTime(s.eta) : "Almost here!",
-      waiting ? "Waiting for the bus to show up…" : "Any minute now");
+    text("hero-big", "Due");
+    text("hero-unit", "");
+    text("hero-sub", `ETA ${fmt(s.eta)}${mins < -1 ? ` · ${Math.round(-mins)} min overdue` : ""} · ${model}`);
   } else {
-    setHero("", waiting ? "Scheduled in" : "Bus comes in", `${Math.ceil(mins)} min`, etaText(s));
+    text("hero-big", String(Math.ceil(mins)));
+    text("hero-unit", "min");
+    text("hero-sub", `ETA ${fmt(s.eta)}${range} · ${model}`);
   }
-  setTrack(waiting ? null : mins);
+  setMeter(live ? mins : null);
 
   if (mins < walkMin) {
-    setLeave("go", "🏃", "Hurry!", `The walk takes ${walkMin}–${walkMax} minutes.`);
+    setLeave("critical", "!", "Hurry", `Bus in ${Math.max(0, Math.ceil(mins))} min`, `Walk takes ${walkMin}–${walkMax} min.`);
   } else if (leaveIn <= 0) {
-    setLeave("go", "🏃", "Time to go!", `Walk to ${s.stop.name} now.`);
+    setLeave("critical", "!", "Leave now", "Leave now", `Target departure was ${fmt(s.leave_by)}.`);
   } else if (leaveIn <= 5) {
-    setLeave("soon", "👟", "Shoes on!", `Leave in ${Math.ceil(leaveIn)} min (by ${fmtTime(s.leave_by)}).`);
+    setLeave("warning", "!", "Prepare to leave", `Leave in ${Math.ceil(leaveIn)} min`, `Depart by ${fmt(s.leave_by)}.`);
   } else {
-    setLeave("calm", "🥣", `Leave by ${fmtTime(s.leave_by)}`, `That's in ${Math.ceil(leaveIn)} minutes. Plenty of time.`);
+    setLeave("good", "✓", "On track", `Leave ${fmt(s.leave_by)}`, `In ${Math.ceil(leaveIn)} min.`);
   }
 }
 
-function renderDetails(s) {
-  const bits = [];
+function renderKpis(s) {
   if (s.bus) {
     const ago = Math.max(0, Math.round((now() - new Date(s.bus.at)) / 1000));
-    bits.push(`Bus seen ${ago < 60 ? `${ago}s` : `${Math.round(ago / 60)} min`} ago` +
-      (s.bus.speed_mph != null ? `, going ${s.bus.speed_mph} mph` : ""));
-  } else if (s.state === "waiting") {
-    bits.push("The bus hasn't shared its location yet.");
+    text("kpi-fix", ago < 60 ? `${ago} s ago` : `${Math.round(ago / 60)} min ago`);
+    text("kpi-fix-sub", fmt(s.bus.at, true));
+    text("kpi-speed", s.bus.speed_mph ?? "–");
+  } else {
+    text("kpi-fix", "–");
+    text("kpi-fix-sub", s.error ? "Glympse unreachable" : "No signal");
+    text("kpi-speed", "–");
   }
   if (s.last_stop) {
-    const diff = Math.round((new Date(s.last_stop.at) - new Date(s.last_stop.scheduled)) / 60000);
-    const vs = diff === 0 ? "on time" : diff > 0 ? `${diff} min late` : `${-diff} min early`;
-    bits.push(`Passed stop ${s.last_stop.num} (${s.last_stop.name}) at ${fmtTime(s.last_stop.at)}: ${vs}`);
+    const dev = (new Date(s.last_stop.at) - new Date(s.last_stop.scheduled)) / 60000;
+    text("kpi-stop", `#${s.last_stop.num} · ${fmt(s.last_stop.at)}`);
+    text("kpi-stop-sub", s.last_stop.name);
+    text("kpi-dev", `${Charts.signed(dev, 0)} min`);
+  } else {
+    text("kpi-stop", "–");
+    text("kpi-stop-sub", " ");
+    text("kpi-dev", "–");
   }
-  if (s.error) bits.push(`⚠️ Having trouble reaching Glympse: ${s.error}`);
-  $("bus-detail").textContent = bits.join(" · ") || `Our stop: ${s.stop.name}`;
 
   let source;
   if (s.eta_source === "history") {
-    source = `Estimate based on ${s.trips_used} past mornings when the bus was at this same spot.`;
+    source = `Current estimate uses ${s.trips_used} past mornings that passed the bus's current position.`;
   } else if (s.eta_source === "arrived") {
-    source = "The bus reached our stop today.";
+    source = "The bus reached the stop today.";
   } else if (s.history_trips < s.min_history_trips) {
-    source = `Using the printed schedule (${fmtTime(s.scheduled)}). Predictions start after ${s.min_history_trips} recorded mornings. So far: ${s.history_trips}.`;
+    source = `Using the printed schedule: ${s.history_trips} of ${s.min_history_trips} mornings needed for the historical model have been recorded.`;
   } else {
-    source = `Using the printed schedule (${fmtTime(s.scheduled)}) until the bus is somewhere we've seen it before.`;
+    source = "Using the printed schedule until the bus reaches a position covered by past mornings.";
   }
-  $("source").textContent = source;
+  if (s.error) source += ` Last Glympse error: ${s.error}`;
+  text("source", source);
+  text("min-trips", s.min_history_trips);
+  text("walk-max", s.walk_minutes[1]);
+  text("stop-name", s.stop.name);
+  const last = s.route[s.route.length - 1];
+  text("subtitle", `Stop ${last.num} of ${s.route.length} · scheduled ${last.scheduled}`);
 }
+
+/* ---------- distribution ---------- */
+
+function renderDistribution() {
+  const s = status;
+  if (!s) return;
+  const empty = historyRows.length === 0;
+  $("dist-empty").hidden = !empty;
+  $("dist-body").hidden = empty;
+  $("table-toggle").hidden = empty;
+  if (empty) return;
+
+  const sched = schedMinutes(s);
+  const rows = historyRows.map((r) => ({
+    m: sched + r.minutes_vs_schedule,
+    label: new Date(`${r.date}T12:00`).toLocaleDateString([], { month: "short", day: "numeric" }),
+  }));
+  const liveEta = s.state === "tracking" || s.state === "waiting";
+  const refs = {
+    sched,
+    eta: liveEta ? toStopMinutes(s, s.eta) : null,
+    etaLow: liveEta && s.eta_source === "history" ? toStopMinutes(s, s.eta_low) : null,
+    etaHigh: liveEta && s.eta_source === "history" ? toStopMinutes(s, s.eta_high) : null,
+  };
+  text("dist-caption", `Arrival at ${s.stop.name}, ${rows.length} recorded morning${rows.length === 1 ? "" : "s"}` +
+    (refs.eta != null ? ". Shaded band: today's ETA range." : "."));
+  Charts.statTiles($("dist-stats"), Charts.stats(rows.map((r) => r.m), sched), sched);
+  Charts.histogram($("hist"), rows, refs);
+  Charts.ecdf($("ecdf"), rows, refs);
+
+  const body = $("dist-table");
+  body.replaceChildren();
+  for (const r of historyRows) {
+    const tr = document.createElement("tr");
+    const date = new Date(`${r.date}T12:00`).toLocaleDateString([], { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+    for (const v of [date, fmt(r.arrived, true), `${Charts.signed(r.minutes_vs_schedule)} min`]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+}
+
+$("table-toggle").addEventListener("click", () => {
+  showTable = !showTable;
+  $("table-toggle").setAttribute("aria-pressed", String(showTable));
+  $("dist-table-wrap").hidden = !showTable;
+});
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderDistribution, 150);
+});
+
+/* ---------- data ---------- */
 
 async function loadHistory() {
   try {
-    const rows = await (await fetch("api/history")).json();
-    if (!rows.length) return;
-    $("history").innerHTML = "";
-    for (const r of rows.slice(0, 10)) {
-      const li = document.createElement("li");
-      const day = new Date(r.date + "T12:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-      const m = r.minutes_vs_schedule;
-      const cls = m > 1 ? "late" : m < -1 ? "early" : "";
-      const vs = Math.abs(m) < 0.5 ? "on time" : m > 0 ? `${Math.round(m)} min late` : `${Math.round(-m)} min early`;
-      li.innerHTML = `<span>${day}</span><span>${fmtTime(r.arrived)} <span class="${cls}">${vs}</span></span>`;
-      $("history").appendChild(li);
-    }
+    historyRows = await (await fetch("api/history", { cache: "no-store" })).json();
+    renderDistribution();
   } catch (e) {
     console.warn("history failed", e);
   }
@@ -190,18 +272,19 @@ async function refresh() {
     const s = await res.json();
     clockOffset = new Date(s.now) - Date.now();
     if (!status) drawStaticMap(s);
+    const etaChanged = !status || status.eta !== s.eta || status.state !== s.state;
     status = s;
     updateMap(s);
-    renderDetails(s);
+    renderKpis(s);
     renderLive();
+    if (etaChanged) renderDistribution();
   } catch (e) {
     console.warn("refresh failed", e);
   }
 }
 
 initMap();
-refresh();
-loadHistory();
+refresh().then(loadHistory);
 setInterval(refresh, REFRESH_MS);
 setInterval(renderLive, 1000);
 setInterval(loadHistory, 10 * 60000);

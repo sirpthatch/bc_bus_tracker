@@ -28,3 +28,14 @@ def test_ended_share_stays_ended(tmp_path):
     asyncio.run(tracker.poll_once())
     assert tracker.share_active is False
     assert len(tracker.store.trip_points("2026-09-30")) == 1
+
+
+def test_arrivals_cover_all_recorded_mornings(tmp_path):
+    from app import config
+
+    store = Store(tmp_path / "t.sqlite3")
+    stop = config.MY_STOP
+    store.add_points("2026-09-28", [Point(1790600000000, stop.lat, stop.lon)])
+    store.add_points("2026-09-29", [Point(1790690000000, 40.60, -74.03)])  # never reached our stop
+    tracker = Tracker(store, FakeClient())
+    assert tracker.arrivals("2026-09-30") == [("2026-09-28", 1790600000000)]
