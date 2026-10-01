@@ -34,7 +34,9 @@ ROUTE = [
     Stop(8, time(7, 55), "8th Ave & 9th St", 40.665749, -73.979224),
     Stop(9, time(7, 58), "5th Ave & 9th St", 40.669173, -73.986304),
 ]
-MY_STOP = ROUTE[-1]
+STOPS = {s.num: s for s in ROUTE}
+# Stop used when a client doesn't say which one it wants.
+DEFAULT_STOP = STOPS[int(os.environ.get("DEFAULT_STOP", ROUTE[-1].num))]
 
 TZ = ZoneInfo(os.environ.get("TZ_NAME", "America/New_York"))
 
@@ -43,15 +45,16 @@ GLYMPSE_API = "https://api.glympse.com/v2"
 # The public viewer's anonymous credentials, as used by glympse.com/!<tag>.
 GLYMPSE_API_KEY = os.environ.get("GLYMPSE_API_KEY", "0SLq661pXHmqdWgI8Yb1")
 
-TRACK_START = _env_time("TRACK_START", "07:30")
+# Starts early enough to cover the first stop (07:10) for riders there.
+TRACK_START = _env_time("TRACK_START", "06:30")
 TRACK_END = _env_time("TRACK_END", "08:30")
 TRACK_WEEKDAYS = {0, 1, 2, 3, 4}  # Mon-Fri
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 # Ignore the time window (for local testing).
 FORCE_TRACKING = os.environ.get("FORCE_TRACKING") == "1"
 
-WALK_MINUTES_MIN = int(os.environ.get("WALK_MINUTES_MIN", "10"))
-WALK_MINUTES_MAX = int(os.environ.get("WALK_MINUTES_MAX", "12"))
+# Suggested walk time for a new viewer; each viewer sets their own in the browser.
+DEFAULT_WALK_MINUTES = int(os.environ.get("DEFAULT_WALK_MINUTES", "10"))
 
 # The bus counts as "at the stop" inside this radius.
 ARRIVE_RADIUS_M = 75

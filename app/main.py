@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
@@ -50,15 +50,25 @@ async def healthz():
     return {"ok": True}
 
 
+def _stop(num: int | None) -> config.Stop:
+    if num is None:
+        return config.DEFAULT_STOP
+    if num not in config.STOPS:
+        raise HTTPException(404, f"No stop {num} on this route")
+    return config.STOPS[num]
+
+
 @app.get("/api/status")
-async def status(request: Request):
+async def status(request: Request, stop: int | None = None):
     tracker: Tracker = request.app.state.tracker
     now = datetime.now(config.TZ)
     today = now.date().isoformat()
+    s = _stop(stop)
     return build_status(
         now,
+        s,
         tracker.store.trip_points(today),
-        tracker.history(today),
+        tracker.history(today, s),
         tracking=in_window(now),
         share_active=tracker.share_active,
         last_error=tracker.last_error,
@@ -66,9 +76,10 @@ async def status(request: Request):
 
 
 @app.get("/api/history")
-async def history(request: Request):
+async def history(request: Request, stop: int | None = None):
     tracker: Tracker = request.app.state.tracker
-    return history_summary(tracker.arrivals(datetime.now(config.TZ).date().isoformat()))
+    s = _stop(stop)
+    return history_summary(tracker.arrivals(datetime.now(config.TZ).date().isoformat(), s), s)
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

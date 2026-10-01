@@ -12,12 +12,13 @@
   <main>
     <header class="topbar">
       <div>
-        <h1>Morning bus · <span id="stop-name">5th Ave &amp; 9th St</span></h1>
-        <div class="subtle" id="subtitle">Stop 9 of 9 · scheduled 07:58</div>
+        <h1>Morning bus · <span id="stop-name">&nbsp;</span></h1>
+        <div class="subtle" id="subtitle">&nbsp;</div>
       </div>
       <div class="topbar-right">
         <span id="pill" class="pill"><span class="pill-dot"></span><span id="pill-label">Loading</span></span>
         <span id="clock" class="clock num">--:--:--</span>
+        <button id="settings-btn" class="btn" type="button">Settings</button>
       </div>
     </header>
 
@@ -85,9 +86,31 @@
     <footer class="method">
       <h2>Method</h2>
       <p id="source" class="subtle"></p>
-      <p class="subtle">ETA = time of latest GPS fix + median time-to-stop from past mornings, measured from the point on each past trip nearest the bus's current position (within 150 m, same heading). Range shown is the interquartile range. With fewer than <span id="min-trips">3</span> matching mornings, the printed schedule is used. Departure time assumes the longest walk, <span id="walk-max">12</span> min.</p>
+      <p class="subtle">ETA = time of latest GPS fix + median time-to-stop from past mornings, measured from the point on each past trip nearest the bus's current position (within 150 m, same heading). Range shown is the interquartile range. With fewer than <span id="min-trips">3</span> matching mornings, the printed schedule is used. Departure time = ETA − your walk time (<span id="walk-max">–</span> min).</p>
     </footer>
   </main>
+
+  <dialog id="settings" class="settings" aria-labelledby="settings-title">
+    <form id="settings-form" method="dialog">
+      <h2 id="settings-title">Your stop</h2>
+      <p class="subtle">Saved in this browser only. Each family sets its own.</p>
+      <label class="field">
+        <span class="label">Bus stop</span>
+        <select id="cfg-stop" required></select>
+      </label>
+      <label class="field">
+        <span class="label">Walk to the stop (minutes)</span>
+        <input id="cfg-walk" type="number" min="0" max="60" step="1" required inputmode="numeric">
+      </label>
+      <div class="settings-actions">
+        <button id="cfg-copy" class="btn" type="button">Copy setup link</button>
+        <span class="spacer"></span>
+        <button id="cfg-cancel" class="btn" type="button" value="cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" value="save">Save</button>
+      </div>
+      <p id="cfg-copied" class="subtle copied" hidden>Link copied. Anyone who opens it gets these settings.</p>
+    </form>
+  </dialog>
 
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>

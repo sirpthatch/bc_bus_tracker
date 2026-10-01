@@ -3,11 +3,14 @@
 const REFRESH_MS = 10000;
 const METER_MINUTES = 30; // the meter spans the last 30 minutes before arrival
 
+const CONFIG_KEY = "busTracker.config.v1";
+
 let status = null;
 let historyRows = [];
 let clockOffset = 0; // server time minus local time
-let map, busMarker, trailLine, fitted = false;
+let map, busMarker, trailLine, stopLayer, fitted = false;
 let showTable = false;
+let cfg = null; // { stop: number, walk: number } chosen by this viewer
 
 const $ = (id) => document.getElementById(id);
 const now = () => new Date(Date.now() + clockOffset);
@@ -16,10 +19,96 @@ const fmt = (iso, seconds = false) =>
 const minutesUntil = (iso) => (new Date(iso) - now()) / 60000;
 const text = (id, value) => { $(id).textContent = value; };
 
+/* ---------- per-viewer settings (this browser only) ---------- */
+
+const validConfig = (c) =>
+  c && Number.isInteger(c.stop) && c.stop > 0 && Number.isFinite(c.walk) && c.walk >= 0 && c.walk <= 60;
+
+function loadConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CONFIG_KEY));
+    return validConfig(c) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveConfig(c) {
+  try {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(c));
+  } catch {
+    // Private mode or storage blocked: settings last for this visit only.
+  }
+}
+
+// A shared link like ?stop=7&walk=5 sets up a new device in one tap.
+function configFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (!p.has("stop")) return null;
+  const c = { stop: Number(p.get("stop")), walk: Number(p.get("walk") ?? 10) };
+  history.replaceState(null, "", location.pathname);
+  return validConfig(c) ? c : null;
+}
+
+const leaveByMs = (s) => new Date(s.eta).getTime() - cfg.walk * 60000;
+
+function openSettings() {
+  const s = status;
+  const select = $("cfg-stop");
+  select.replaceChildren();
+  for (const stop of s.route) {
+    const opt = document.createElement("option");
+    opt.value = stop.num;
+    opt.textContent = `${stop.num}. ${stop.name} (${stop.scheduled})`;
+    select.appendChild(opt);
+  }
+  select.value = cfg.stop;
+  $("cfg-walk").value = cfg.walk;
+  $("cfg-copied").hidden = true;
+  $("settings").showModal();
+}
+
+function readSettingsForm() {
+  return { stop: Number($("cfg-stop").value), walk: Math.round(Number($("cfg-walk").value)) };
+}
+
+$("settings-btn").addEventListener("click", () => status && openSettings());
+$("cfg-cancel").addEventListener("click", () => $("settings").close());
+$("settings-form").addEventListener("submit", (evt) => {
+  evt.preventDefault();
+  const c = readSettingsForm();
+  if (!validConfig(c)) return;
+  $("settings").close();
+  applyConfig(c);
+});
+$("cfg-copy").addEventListener("click", async () => {
+  const c = readSettingsForm();
+  const url = `${location.origin}${location.pathname}?stop=${c.stop}&walk=${c.walk}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    $("cfg-copied").textContent = "Link copied. Anyone who opens it gets these settings.";
+  } catch {
+    $("cfg-copied").textContent = url;
+  }
+  $("cfg-copied").hidden = false;
+});
+
+function applyConfig(c) {
+  const stopChanged = !cfg || cfg.stop !== c.stop;
+  cfg = c;
+  saveConfig(c);
+  if (stopChanged) {
+    status = null;
+    fitted = false;
+    historyRows = [];
+  }
+  refresh().then(() => stopChanged && loadHistory());
+}
+
 // Minutes since midnight in the stop's timezone, anchored on the scheduled time so the
 // viewer's own timezone doesn't matter.
 function schedMinutes(s) {
-  const [h, m] = s.route[s.route.length - 1].scheduled.split(":").map(Number);
+  const [h, m] = s.stop.scheduled.split(":").map(Number);
   return h * 60 + m;
 }
 const toStopMinutes = (s, iso) => schedMinutes(s) + (new Date(iso) - new Date(s.scheduled)) / 60000;
@@ -33,18 +122,21 @@ function initMap() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(map);
   trailLine = L.polyline([], { color: getComputedStyle(document.documentElement).getPropertyValue("--series").trim(), weight: 3, opacity: 0.9 }).addTo(map);
+  stopLayer = L.layerGroup().addTo(map);
 }
 
-function drawStaticMap(s) {
-  for (const stop of s.route.slice(0, -1)) {
+function drawStops(s) {
+  stopLayer.clearLayers();
+  for (const stop of s.route) {
+    if (stop.num === s.stop.num) continue;
     L.marker([stop.lat, stop.lon], {
       icon: L.divIcon({ className: "", html: `<div class="m-route">${stop.num}</div>`, iconSize: [18, 18] }),
-    }).bindTooltip(`${stop.num}. ${stop.name} · ${stop.scheduled}`).addTo(map);
+    }).bindTooltip(`${stop.num}. ${stop.name} · ${stop.scheduled}`).addTo(stopLayer);
   }
   L.marker([s.stop.lat, s.stop.lon], {
     icon: L.divIcon({ className: "", html: '<div class="m-stop"></div>', iconSize: [14, 14] }),
     zIndexOffset: 500,
-  }).bindTooltip(`Our stop: ${s.stop.name}`).addTo(map);
+  }).bindTooltip(`Your stop: ${s.stop.num}. ${s.stop.name} · ${s.stop.scheduled}`).addTo(stopLayer);
   map.fitBounds(s.route.map((r) => [r.lat, r.lon]), { padding: [20, 20] });
 }
 
@@ -98,7 +190,7 @@ function renderLive() {
   const s = status;
   if (!s) return;
   text("clock", now().toLocaleTimeString([], { hourCycle: "h23" }));
-  const [walkMin, walkMax] = s.walk_minutes;
+  const walk = cfg.walk;
   const [pillCls, pillLabel] = PILL[s.state] || ["", s.state];
   $("pill").className = `pill ${pillCls}`;
   text("pill-label", pillLabel);
@@ -125,12 +217,13 @@ function renderLive() {
       : `Live tracking ${s.track_window[0]}–${s.track_window[1]} on school days.`);
     setMeter(null);
     setLeave("", "–", s.state === "ended" ? "No live data" : "Scheduled",
-      `Leave ${fmt(s.leave_by)}`, `Printed schedule minus ${walkMax}-min walk.`);
+      `Leave ${fmt(leaveByMs(s))}`, `Printed schedule minus ${walk}-min walk.`);
     return;
   }
 
   const mins = minutesUntil(s.eta);
-  const leaveIn = minutesUntil(s.leave_by);
+  const leaveBy = leaveByMs(s);
+  const leaveIn = minutesUntil(leaveBy);
   const live = s.state === "tracking";
   const model = s.eta_source === "history" ? `historical model, n=${s.trips_used}` : "printed schedule";
   const range = s.eta_source === "history" && fmt(s.eta_low) !== fmt(s.eta_high)
@@ -148,14 +241,14 @@ function renderLive() {
   }
   setMeter(live ? mins : null);
 
-  if (mins < walkMin) {
-    setLeave("critical", "!", "Hurry", `Bus in ${Math.max(0, Math.ceil(mins))} min`, `Walk takes ${walkMin}–${walkMax} min.`);
+  if (walk > 0 && mins < walk) {
+    setLeave("critical", "!", "Hurry", `Bus in ${Math.max(0, Math.ceil(mins))} min`, `Your walk takes ${walk} min.`);
   } else if (leaveIn <= 0) {
-    setLeave("critical", "!", "Leave now", "Leave now", `Target departure was ${fmt(s.leave_by)}.`);
+    setLeave("critical", "!", "Leave now", "Leave now", `Target departure was ${fmt(leaveBy)}.`);
   } else if (leaveIn <= 5) {
-    setLeave("warning", "!", "Prepare to leave", `Leave in ${Math.ceil(leaveIn)} min`, `Depart by ${fmt(s.leave_by)}.`);
+    setLeave("warning", "!", "Prepare to leave", `Leave in ${Math.ceil(leaveIn)} min`, `Depart by ${fmt(leaveBy)}.`);
   } else {
-    setLeave("good", "✓", "On track", `Leave ${fmt(s.leave_by)}`, `In ${Math.ceil(leaveIn)} min.`);
+    setLeave("good", "✓", "On track", `Leave ${fmt(leaveBy)}`, `In ${Math.ceil(leaveIn)} min.`);
   }
 }
 
@@ -194,10 +287,9 @@ function renderKpis(s) {
   if (s.error) source += ` Last Glympse error: ${s.error}`;
   text("source", source);
   text("min-trips", s.min_history_trips);
-  text("walk-max", s.walk_minutes[1]);
+  text("walk-max", cfg.walk);
   text("stop-name", s.stop.name);
-  const last = s.route[s.route.length - 1];
-  text("subtitle", `Stop ${last.num} of ${s.route.length} · scheduled ${last.scheduled}`);
+  text("subtitle", `Stop ${s.stop.num} of ${s.route.length} · scheduled ${s.stop.scheduled} · ${cfg.walk}-min walk`);
 }
 
 /* ---------- distribution ---------- */
@@ -259,7 +351,10 @@ window.addEventListener("resize", () => {
 
 async function loadHistory() {
   try {
-    historyRows = await (await fetch("api/history", { cache: "no-store" })).json();
+    const stopNum = cfg.stop;
+    const rows = await (await fetch(`api/history?stop=${stopNum}`, { cache: "no-store" })).json();
+    if (stopNum !== cfg.stop) return;
+    historyRows = rows;
     renderDistribution();
   } catch (e) {
     console.warn("history failed", e);
@@ -267,11 +362,19 @@ async function loadHistory() {
 }
 
 async function refresh() {
+  if (!cfg) return;
   try {
-    const res = await fetch("api/status", { cache: "no-store" });
+    const res = await fetch(`api/status?stop=${cfg.stop}`, { cache: "no-store" });
+    if (res.status === 404) {
+      // Saved stop no longer exists on the route; fall back to the default and ask again.
+      cfg = null;
+      status = null;
+      return start(true);
+    }
     const s = await res.json();
+    if (s.stop.num !== cfg.stop) return; // response for a stop the viewer just switched away from
     clockOffset = new Date(s.now) - Date.now();
-    if (!status) drawStaticMap(s);
+    if (!status) drawStops(s);
     const etaChanged = !status || status.eta !== s.eta || status.state !== s.state;
     status = s;
     updateMap(s);
@@ -283,8 +386,22 @@ async function refresh() {
   }
 }
 
+async function start(askForSettings) {
+  if (!cfg) {
+    // First visit: show the default stop behind the settings dialog.
+    const s = await (await fetch("api/status", { cache: "no-store" })).json();
+    cfg = { stop: s.stop.num, walk: s.default_walk_minutes };
+  }
+  await refresh();
+  loadHistory();
+  if (askForSettings && status) openSettings();
+}
+
 initMap();
-refresh().then(loadHistory);
+const fromUrl = configFromUrl();
+if (fromUrl) saveConfig(fromUrl);
+cfg = fromUrl || loadConfig();
+start(!cfg);
 setInterval(refresh, REFRESH_MS);
 setInterval(renderLive, 1000);
 setInterval(loadHistory, 10 * 60000);

@@ -1,24 +1,33 @@
 # School bus tracker
 
 Follows the morning school bus (Glympse tag `bcscarroll6`), records its trail
-every school day, and predicts when it will reach our stop (5th Ave & 9th St,
-scheduled 7:58). The page shows a big countdown, when to leave for the
-10–12 minute walk, a bus-to-house track for the kids, and a live map.
+every school day, and predicts when it will reach any stop on the route. Each
+viewer picks their stop and walk time; the page shows the ETA, when to leave,
+a live map, and the distribution of past arrival times at that stop.
+
+## Multiple families
+
+Settings (stop + walk minutes) live in each browser's `localStorage`; the
+server stores nothing per user. The first visit opens the settings dialog.
+To set up someone else's device, use **Settings → Copy setup link**, which
+produces a link like `/?stop=7&walk=5`. Opening it saves those settings and
+skips the dialog. If `SITE_PASSWORD` is set, they'll also need the password.
 
 ## How it works
 
-- **Recorder** (`app/tracker.py`): Mon–Fri, 7:30–8:30 America/New_York, polls
+- **Recorder** (`app/tracker.py`): Mon–Fri, 6:30–8:30 America/New_York, polls
   the public Glympse viewer API every 30s and stores each GPS point in SQLite.
   Glympse only keeps the last ~10 minutes after a share ends, so history can
   only be built by recording live.
-- **Prediction** (`app/predict.py`): for each past morning that reached our
-  stop, find the moment the bus was where it is now (same direction) and take
+- **Prediction** (`app/predict.py`): for each past morning that reached the
+  viewer's stop, find the moment the bus was where it is now (same direction) and take
   the time it needed from there. The median over past mornings is the ETA; the
   quartiles are the range shown.
 - **Fallback**: until there are 3 recorded mornings, or when the bus is
-  somewhere past trips never matched, the ETA is the printed 7:58.
-- **Leave-by** = ETA − 12 minutes. Green: plenty of time. Yellow (5 min before):
-  shoes on. Red: time to go, or hurry if the bus is under 10 minutes away.
+  somewhere past trips never matched, the ETA is the stop's printed time.
+- **Leave-by** = ETA − the viewer's walk time, computed in the browser. Green:
+  on track. Yellow (5 min before): prepare to leave. Red: leave now, or hurry
+  if the bus is closer than the walk.
 
 ## Run locally
 
@@ -48,9 +57,10 @@ Open http://localhost:8000. Data goes to `./data/bus.sqlite3`.
 
 | Variable | Default | |
 |---|---|---|
-| `TRACK_START` / `TRACK_END` | `07:30` / `08:30` | Recording window, local time |
+| `TRACK_START` / `TRACK_END` | `06:30` / `08:30` | Recording window, local time. Start before the first stop (07:10). |
 | `POLL_SECONDS` | `30` | Glympse poll interval |
-| `WALK_MINUTES_MIN` / `WALK_MINUTES_MAX` | `10` / `12` | Walk to the stop |
+| `DEFAULT_STOP` | `9` | Stop shown to a viewer who hasn't chosen one |
+| `DEFAULT_WALK_MINUTES` | `10` | Pre-filled walk time for new viewers |
 | `MIN_HISTORY_TRIPS` | `3` | Mornings needed before trusting history |
 | `GLYMPSE_TAG` | `bcscarroll6` | Glympse tag to follow |
 | `TZ_NAME` | `America/New_York` | |
@@ -61,5 +71,7 @@ Route stops and coordinates are in `app/config.py` (`ROUTE`). Our stop is the la
 
 ## API
 
-- `GET /api/status`: everything the page shows (state, ETA, bus position, trail)
-- `GET /api/history`: past mornings' arrival times vs. schedule
+- `GET /api/status?stop=N`: everything the page shows for stop N (state, ETA, bus position, trail)
+- `GET /api/history?stop=N`: past mornings' arrival times at stop N vs. its schedule
+
+`stop` defaults to `DEFAULT_STOP`; an unknown stop returns 404.

@@ -16,8 +16,8 @@ def _iso(ts_ms: int | None) -> str | None:
     return datetime.fromtimestamp(ts_ms / 1000, config.TZ).isoformat()
 
 
-def _scheduled_on(day: date) -> datetime:
-    return datetime.combine(day, config.MY_STOP.scheduled, config.TZ)
+def _scheduled_on(day: date, stop: config.Stop) -> datetime:
+    return datetime.combine(day, stop.scheduled, config.TZ)
 
 
 def next_school_morning(now: datetime) -> date:
@@ -31,19 +31,19 @@ def next_school_morning(now: datetime) -> date:
 
 def build_status(
     now: datetime,
+    stop: config.Stop,
     today_points: list[Point],
     history: list[PastTrip],
     tracking: bool,
     share_active: bool,
     last_error: str | None = None,
 ) -> dict:
-    stop = config.MY_STOP
     arrival_ts = find_arrival(today_points, stop.lat, stop.lon)
     latest = today_points[-1] if today_points else None
     bus_fresh = latest is not None and now - datetime.fromtimestamp(latest.ts / 1000, config.TZ) < STALE_AFTER
 
     service_day = now.date() if tracking or arrival_ts else next_school_morning(now)
-    scheduled = _scheduled_on(service_day)
+    scheduled = _scheduled_on(service_day, stop)
 
     if arrival_ts:
         state = "arrived"
@@ -72,7 +72,13 @@ def build_status(
     return {
         "now": now.isoformat(),
         "state": state,
-        "stop": {"name": stop.name, "lat": stop.lat, "lon": stop.lon},
+        "stop": {
+            "num": stop.num,
+            "name": stop.name,
+            "lat": stop.lat,
+            "lon": stop.lon,
+            "scheduled": stop.scheduled.strftime("%H:%M"),
+        },
         "scheduled": scheduled.isoformat(),
         "eta": _iso(eta_ts),
         "eta_low": _iso(low_ts),
@@ -81,8 +87,7 @@ def build_status(
         "history_trips": len(history),
         "trips_used": prediction.trips_used if prediction else 0,
         "min_history_trips": config.MIN_HISTORY_TRIPS,
-        "leave_by": _iso(eta_ts - config.WALK_MINUTES_MAX * 60_000),
-        "walk_minutes": [config.WALK_MINUTES_MIN, config.WALK_MINUTES_MAX],
+        "default_walk_minutes": config.DEFAULT_WALK_MINUTES,
         "arrived_at": _iso(arrival_ts),
         "bus": (
             {
@@ -100,9 +105,7 @@ def build_status(
             {
                 "num": passed[0].num,
                 "name": passed[0].name,
-                "scheduled": _scheduled_on(now.date()).replace(
-                    hour=passed[0].scheduled.hour, minute=passed[0].scheduled.minute
-                ).isoformat(),
+                "scheduled": _scheduled_on(now.date(), passed[0]).isoformat(),
                 "at": _iso(passed[1]),
             }
             if passed
@@ -117,11 +120,11 @@ def build_status(
     }
 
 
-def history_summary(arrivals: list[tuple[str, int]]) -> list[dict]:
+def history_summary(arrivals: list[tuple[str, int]], stop: config.Stop) -> list[dict]:
     out = []
     for trip_date, arrival_ts in arrivals:
         arrived = datetime.fromtimestamp(arrival_ts / 1000, config.TZ)
-        scheduled = _scheduled_on(arrived.date())
+        scheduled = _scheduled_on(arrived.date(), stop)
         out.append({
             "date": trip_date,
             "arrived": arrived.isoformat(),

@@ -147,6 +147,26 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer;
 }
 .btn[aria-pressed="true"] { background: var(--grid); }
+.btn-primary { background: var(--series); border-color: var(--series); color: #fff; }
+
+/* Settings dialog */
+.settings {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--ink);
+  padding: 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.settings::backdrop { background: rgba(0, 0, 0, 0.35); }
+.settings h2 { font-size: 16px; }
+.settings p { margin: 4px 0 16px; }
+.field { display: grid; gap: 4px; margin-bottom: 14px; }
+.field select, .field input {
+  font: inherit; font-size: 15px; color: var(--ink); background: var(--page);
+  border: 1px solid var(--axis); border-radius: 6px; padding: 8px 10px; width: 100%;
+}
+.settings-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.settings-actions .spacer { flex: 1; }
+.settings .copied { margin: 12px 0 0; }
 .stats {
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
   border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid);

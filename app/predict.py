@@ -40,12 +40,26 @@ def find_arrival(points: list[Point], lat: float, lon: float, radius_m: float = 
     return None
 
 
-def build_past_trip(date: str, points: list[Point], stop: config.Stop = config.MY_STOP) -> PastTrip | None:
-    arrival = find_arrival(points, stop.lat, stop.lon)
+def arrivals_by_stop(points: list[Point], route: list[config.Stop] = config.ROUTE) -> dict[int, int | None]:
+    return {s.num: find_arrival(points, s.lat, s.lon) for s in route}
+
+
+def build_past_trip(date: str, points: list[Point], stop: config.Stop, arrival: int | None = None) -> PastTrip | None:
+    if arrival is None:
+        arrival = find_arrival(points, stop.lat, stop.lon)
     if arrival is None:
         return None
     before = [p for p in points if p.ts <= arrival]
     return PastTrip(date, before, arrival)
+
+
+def thin(points: list[Point], min_gap_ms: int = 5000) -> list[Point]:
+    """Keep at most one point per min_gap_ms. Plenty for matching, and far less memory."""
+    out: list[Point] = []
+    for p in points:
+        if not out or p.ts - out[-1].ts >= min_gap_ms:
+            out.append(p)
+    return out
 
 
 def _moving(p: Point) -> bool:

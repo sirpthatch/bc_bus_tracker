@@ -7,7 +7,8 @@ from datetime import datetime
 from . import config
 from .db import Store
 from .glympse import GlympseClient
-from .predict import PastTrip, build_past_trip, find_arrival
+from .geo import Point
+from .predict import PastTrip, arrivals_by_stop, build_past_trip, thin
 
 log = logging.getLogger(__name__)
 
@@ -28,32 +29,48 @@ class Tracker:
         self.share_active = False
         self.last_poll: datetime | None = None
         self.last_error: str | None = None
-        self._history: tuple[str, list[PastTrip]] | None = None
-        # Arrival time at our stop per past date (None = never reached it). Past days don't change.
-        self._arrivals: dict[str, int | None] = {}
+        # Arrival time at each stop per past date (None = never reached it). Past days don't change.
+        self._day_arrivals: dict[str, dict[int, int | None]] = {}
+        # Thinned trails of the most recent mornings, reloaded once per day.
+        self._recent: tuple[str, list[tuple[str, list[Point]]]] | None = None
+        self._history: dict[tuple[str, int], list[PastTrip]] = {}
 
-    def history(self, today: str) -> list[PastTrip]:
-        """Past trips that reached our stop, most recent first. Cached per day."""
-        if self._history is None or self._history[0] != today:
+    def _remember_arrivals(self, date: str, points: list[Point] | None = None) -> dict[int, int | None]:
+        if date not in self._day_arrivals:
+            self._day_arrivals[date] = arrivals_by_stop(points if points is not None else self.store.trip_points(date))
+        return self._day_arrivals[date]
+
+    def _recent_trails(self, today: str) -> list[tuple[str, list[Point]]]:
+        if self._recent is None or self._recent[0] != today:
+            trails = []
+            for date in self.store.trip_dates(before=today, limit=config.MAX_HISTORY_TRIPS):
+                points = self.store.trip_points(date)
+                self._remember_arrivals(date, points)
+                trails.append((date, thin(points)))
+            self._recent = (today, trails)
+            self._history = {}
+        return self._recent[1]
+
+    def history(self, today: str, stop: config.Stop) -> list[PastTrip]:
+        """Recent past trips that reached this stop, most recent first. Cached per day."""
+        trails = self._recent_trails(today)
+        key = (today, stop.num)
+        if key not in self._history:
             trips = []
-            for date in self.store.trip_dates(before=today, limit=config.MAX_HISTORY_TRIPS * 2):
-                trip = build_past_trip(date, self.store.trip_points(date))
-                if trip:
-                    trips.append(trip)
-                if len(trips) >= config.MAX_HISTORY_TRIPS:
-                    break
-            self._history = (today, trips)
-        return self._history[1]
+            for date, points in trails:
+                arrival = self._day_arrivals[date][stop.num]
+                if arrival is not None:
+                    trips.append(build_past_trip(date, points, stop, arrival))
+            self._history[key] = trips
+        return self._history[key]
 
-    def arrivals(self, today: str) -> list[tuple[str, int]]:
-        """(date, arrival_ts) for every recorded morning before today, most recent first."""
+    def arrivals(self, today: str, stop: config.Stop) -> list[tuple[str, int]]:
+        """(date, arrival_ts) at this stop for every recorded morning before today, most recent first."""
         out = []
         for date in self.store.trip_dates(before=today, limit=10_000):
-            if date not in self._arrivals:
-                stop = config.MY_STOP
-                self._arrivals[date] = find_arrival(self.store.trip_points(date), stop.lat, stop.lon)
-            if self._arrivals[date] is not None:
-                out.append((date, self._arrivals[date]))
+            arrival = self._remember_arrivals(date)[stop.num]
+            if arrival is not None:
+                out.append((date, arrival))
         return out
 
     async def poll_once(self) -> None:
